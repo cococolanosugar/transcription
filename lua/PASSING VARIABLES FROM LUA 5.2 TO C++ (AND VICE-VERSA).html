@@ -1,0 +1,183 @@
+This is the second installment of the notes I am taking while fighting with Lua and C++ to get along. If you have not yet, you may want to read my first post about Running a Lua 5.2 script from C++. Mostly, I have been studying the code from the Lua-User Wiki Sample Code and the Lua 5.2 Reference Manual.
+
+Last post was not complicated at all, right? Actually, it does not demonstrate the real power of embedding Lua in your C++ program. I hope that with this example I convince you into further studying and using Lua for your applications.
+
+Our goal is twofold. Firstly, we will pass some arguments from the host (C++ program) to a Lua script. Secondly, we will recover in the host some return values from the same script. Yes, return values. Plural because Lua can return more than one argument!
+
+Lua script
+
+The Lua script is just a parrot displaying all the variables we pass through a global sequence called “arg”, and a dispenser of variables of different Lua types. It looks like this:
+
+-- print the arguments passed from C
+io.write("[Lua] These args were passed into the script from Cn")
+for i=1,#arg do
+    print("      ", i, arg[i])
+end 
+-- return a value of different Lua types (boolean, table, numeric, string)
+io.write("[Lua] Script returning data back to Cn")
+
+-- create the table
+local temp = {}
+temp[1]=9
+temp[2]="See you space cowboy!"
+
+return true,temp,21,"I am a mushroom"
+Now we have to make a C++ program to pass the information to Lua, execute the script, and recover the information returned from it.
+
+C++ program
+
+As in the previous tutorial, I will give you the whole enchilada and then we will discuss the different pieces in more detail.
+
+#include <iostream>
+#include <sstream>
+
+#include <lua.hpp>
+
+int main(int argc, char* argv[])
+{
+    // new Lua state
+    std::cout << "[C++] Starting Lua state" << std::endl;
+    lua_State *lua_state = luaL_newstate();
+
+    // load Lua libraries
+    std::cout << "[C++] Loading Lua libraries" << std::endl;
+    static const luaL_Reg lualibs[] = 
+    {
+        {"base", luaopen_base},
+        {"io", luaopen_io},
+        {NULL, NULL}
+    };
+    const luaL_Reg *lib = lualibs;
+    for(; lib->func != NULL; lib++)
+    {
+        std::cout << " loading '" << lib->name << "'" << std::endl;
+        luaL_requiref(lua_state, lib->name, lib->func, 1);
+        lua_settop(lua_state, 0);
+    }
+
+    // start the arg table in Lua
+    std::cout << "[C++] Creating the arg table" << std::endl;
+    lua_createtable(lua_state, 2, 0);
+    lua_pushnumber(lua_state, 1);
+    lua_pushnumber(lua_state, 49);
+    lua_settable(lua_state, -3);
+    lua_pushnumber(lua_state, 2);
+    lua_pushstring(lua_state, "Life is a beach");
+    lua_settable(lua_state, -3);
+    lua_setglobal(lua_state, "arg");
+
+    // load the script
+    std::cout << "[C++] Loading the Lua script" << std::endl;
+    int status = luaL_loadfile(lua_state, "parrotscript.lua");
+    std::cout << " return: " << status << std::endl;
+
+    // run the script with the given arguments
+    std::cout << "[C++] Running script" << std::endl;
+    int result = 0;
+    if(status == LUA_OK)
+    {
+        result = lua_pcall(lua_state, 0, LUA_MULTRET, 0);
+    }
+    else
+    {
+        std::cout << " Could not load the script." << std::endl;
+    }
+
+    // print the values returned from the script
+    std::cout << "[C++] Values returned from the script:" << std::endl;
+    std::stringstream str_buf;
+    while(lua_gettop(lua_state))
+    {
+        str_buf.str(std::string());
+        str_buf << " ";
+        switch(lua_type(lua_state, lua_gettop(lua_state)))
+        {
+        case LUA_TNUMBER:
+            str_buf << "script returned the number: "
+                 << lua_tonumber(lua_state, lua_gettop(lua_state));
+            break;
+        case LUA_TTABLE:
+            str_buf << "script returned a table";
+            break;
+        case LUA_TSTRING:
+            str_buf << "script returned the string: "
+                 << lua_tostring(lua_state, lua_gettop(lua_state));
+            break;
+        case LUA_TBOOLEAN:
+            str_buf << "script returned the boolean: "
+                 << lua_toboolean(lua_state, lua_gettop(lua_state));
+            break;
+        default:
+            str_buf << "script returned an unknown-type value";
+        }
+        lua_pop(lua_state, 1);
+        std::cout << str_buf.str() << std::endl;
+    }
+
+    // close the Lua state
+    std::cout << "[C++] Closing the Lua state" << std::endl;
+    return 0;
+}
+As you can see, the basic structure of the previous tutorial is preserved. We open the Lua state, load libraries, work on the Lua virtual machine, and close the Lua state. The output of the program is:
+
+
+
+The details
+
+The keen reader would have noticed that we drop the luaL_dofile() “function” — actually it is a macro — for running the script. Instead we load the script into the Lua stack (more about Lua stack bellow) using luaL_loadfile() and run it using lua_pcall(). This is just to show how the luaL_dofile macro works. It is defined as:
+
+    (luaL_loadfile(L, filename) || lua_pcall(L, 0, LUA_MULTRET, 0))
+according to the Lua reference manual. So there is, essentially, nothing new there.
+
+I think it is time we introduce the Lua stack. The Lua stack serves as a bridge between the host and Lua. The host can place values in the stack that will be visible to the Lua virtual machine, and the Lua virtual machine can place values in the stack that will be visible by the host. It sounds primitive but it is effective. The next piece of code uses it intensively:
+
+    // start the arg table in Lua
+    lua_createtable(lua_state, 2, 0);
+    lua_pushnumber(lua_state, 1);
+    lua_pushnumber(lua_state, 49);
+    lua_settable(lua_state, -3);
+    lua_pushnumber(lua_state, 2);
+    lua_pushstring(lua_state, "Life is a beach");
+    lua_settable(lua_state, -3);
+    lua_setglobal(lua_state, "arg");
+It is responsible for the creation of the “arg” global table that will be passed to Lua as input argument. The table will be a sequence and will have two elements:
+
+arg[1] = 49
+arg[2] = "Life is a beach"
+The code can be separated in three parts:
+
+Creation of the table
+Population of the table
+Appellation of the table
+The first part is accomplished by the lua_createtable() function. This function creates an unnamed table and stores it as the top value of the stack. Its definition is
+
+void lua_createtable(lua_State *L, int narr, int nrec);
+where the narr and nrec arguments are our estimation of the number of elements as a sequence and number of non-sequential elements, respectively. Since our table has only two sequential elements, we choose 2 and 0 as our narr and nrec arguments.
+
+Next we populate the table with our desired values. For that purpose we push to the stack two values using the lua_push*() set of functions. The first pushed valued is the table index in which we want to store some value. The second pushed value is the actual value we want to store in the table. Then, with lua_settable(lua_state, -3) we we perform in the table, t,  stored as the third value in the stack — that is what -3 means — the operation:
+
+t[k] = v
+where v and k are the top and second element of the stack. Therefore, this code:
+
+    lua_pushnumber(lua_state, 1);
+    lua_pushnumber(lua_state, 49);
+    lua_settable(lua_state, -3);
+just sets the index 1 of our unnamed table to the value 49. Notice that it also pops the index and value stored in the stack, leaving the table as the top value of the stack.
+
+The last thing we have to do is name the table we have created and populated. This is accomplished by the lua_setglobal() sentence, which pops the top of the stack — our table — and sets it as a global table under the given name — in our case “arg”. Lua will be able to see this table from the script.
+
+Once our script has run, the Lua return values are accessed from C++ via the stack. Notice that Lua pushes first the first return value, and last the last one. Thus, popping from the stack recovers the return values in inverse order compared to the return statement in Lua.
+
+The piece of code that makes use of the returned values is large because it has all the verbose system attached. Essentially, it only consists in four operations:
+
+Get the stack top position using lua_gettop()
+Get the type of the value stored in a certain stack position using lua_type()
+Convert a stack value into a C++ value using the set of lua_to*() functions
+Pop values from the stack using lua_pop()
+which are quite self-explanatory.
+
+And that is it!
+
+This covers the basics of sharing data between the host program and Lua. For instance, you can play with the program changing the Lua script and seeing how the output changes according to that. Remember that you do not need to recompile to see the effects!
+
+Stay tuned for the next episode, which will be something related to calling C++ functions from Lua. Read the next tutorial!
