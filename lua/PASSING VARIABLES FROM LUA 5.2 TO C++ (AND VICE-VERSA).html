@@ -1,13 +1,15 @@
 This is the second installment of the notes I am taking while fighting with Lua and C++ to get along. If you have not yet, you may want to read my first post about Running a Lua 5.2 script from C++. Mostly, I have been studying the code from the Lua-User Wiki Sample Code and the Lua 5.2 Reference Manual.
-
+这是第二篇关于我和c++lua混编肉搏的笔记。如果你还涉之未深，或许你应该读一下我的第一篇文章。
+文中大多引述均来自lua用户WIKI和lua5.2的用户手册。
 Last post was not complicated at all, right? Actually, it does not demonstrate the real power of embedding Lua in your C++ program. I hope that with this example I convince you into further studying and using Lua for your applications.
-
+上篇文章还不算结束，关于c++和lua混编的强悍我们并未深入。我希望通过以下示例让你能更进一步在你的应用中使用lua.
 Our goal is twofold. Firstly, we will pass some arguments from the host (C++ program) to a Lua script. Secondly, we will recover in the host some return values from the same script. Yes, return values. Plural because Lua can return more than one argument!
-
+我们的目标有两个：第一，从宿主语言c++往Lua脚本中传递参数。第二，从Lua脚本中接收返回数据。注意，Lua脚本可以返回不止一个数据哦！
 Lua script
-
+Lua脚本部分
 The Lua script is just a parrot displaying all the variables we pass through a global sequence called “arg”, and a dispenser of variables of different Lua types. It looks like this:
-
+以下Lua脚本只是简单通过一个arg序列打印我们传递的参数，然后返回不同类型Lua变量。
+代码如下：
 -- print the arguments passed from C
 io.write("[Lua] These args were passed into the script from Cn")
 for i=1,#arg do
@@ -22,12 +24,13 @@ temp[1]=9
 temp[2]="See you space cowboy!"
 
 return true,temp,21,"I am a mushroom"
+
 Now we have to make a C++ program to pass the information to Lua, execute the script, and recover the information returned from it.
-
+为了在c++和Lua之间互传信息，我们必须编译c++程序。
 C++ program
-
+c++部分
 As in the previous tutorial, I will give you the whole enchilada and then we will discuss the different pieces in more detail.
-
+正如上篇教程，我会先奉上完整代码，然后逐步剖析。
 #include <iostream>
 #include <sstream>
 
@@ -119,18 +122,19 @@ int main(int argc, char* argv[])
     return 0;
 }
 As you can see, the basic structure of the previous tutorial is preserved. We open the Lua state, load libraries, work on the Lua virtual machine, and close the Lua state. The output of the program is:
-
-
+正如亲眼所见，程序的基本结构一如从前。我们打开一个状态机，加载库文件，在状态机上运行脚本，最后关闭状态机。
+程序输出如下：
 
 The details
-
+细节剖析
 The keen reader would have noticed that we drop the luaL_dofile() “function” — actually it is a macro — for running the script. Instead we load the script into the Lua stack (more about Lua stack bellow) using luaL_loadfile() and run it using lua_pcall(). This is just to show how the luaL_dofile macro works. It is defined as:
-
+细心如你者，一定发现了这次我们并未使用luaL_dofile()函数（事实上它是一个宏）来执行脚本。而是代之以luaL_loadfile()加载脚本，以lua_pcall()执行脚本。这是为了展示luaL_dofile宏的原理，实际上luaL_dofile是以上两个函数的合体，其宏定义如下：
     (luaL_loadfile(L, filename) || lua_pcall(L, 0, LUA_MULTRET, 0))
 according to the Lua reference manual. So there is, essentially, nothing new there.
-
+根据Lua手册所述，因此，并没有什么新知识。
 I think it is time we introduce the Lua stack. The Lua stack serves as a bridge between the host and Lua. The host can place values in the stack that will be visible to the Lua virtual machine, and the Lua virtual machine can place values in the stack that will be visible by the host. It sounds primitive but it is effective. The next piece of code uses it intensively:
-
+我认为是时候，介绍一下Lua堆栈了。Lua堆栈是连接宿主语言和Lua的桥梁。宿主语言可以在堆栈中放入Lua状态机可见的数据，而Lua状态机也可以在Lua堆栈中放入宿主语言可见的数据。虽然听起来很老土，但是很有效。
+以下代码很直观的反应了这一点：
     // start the arg table in Lua
     lua_createtable(lua_state, 2, 0);
     lua_pushnumber(lua_state, 1);
@@ -141,43 +145,55 @@ I think it is time we introduce the Lua stack. The Lua stack serves as a bridge 
     lua_settable(lua_state, -3);
     lua_setglobal(lua_state, "arg");
 It is responsible for the creation of the “arg” global table that will be passed to Lua as input argument. The table will be a sequence and will have two elements:
-
+这段代码的作用是创建类型为table的全局变量arg作为Lua的输入参数。
+此table将作为一个序列传递，并含有连个元素：
 arg[1] = 49
 arg[2] = "Life is a beach"
 The code can be separated in three parts:
-
+这段代码可以分为三部分：
 Creation of the table
 Population of the table
 Appellation of the table
-The first part is accomplished by the lua_createtable() function. This function creates an unnamed table and stores it as the top value of the stack. Its definition is
+创建table
+填充table
+命名table
 
+The first part is accomplished by the lua_createtable() function. This function creates an unnamed table and stores it as the top value of the stack. Its definition is
+第一部分通过lua_createtable()函数完成，此函数创建一个匿名table并把它存入堆栈的顶部，其定义如下：
 void lua_createtable(lua_State *L, int narr, int nrec);
 where the narr and nrec arguments are our estimation of the number of elements as a sequence and number of non-sequential elements, respectively. Since our table has only two sequential elements, we choose 2 and 0 as our narr and nrec arguments.
-
+其中参数narr和nrec分别用于指明序列元素和非序列元素的的数量。因为我们的table只有连个序列元素，所以我们传递的实参为2和0.
 Next we populate the table with our desired values. For that purpose we push to the stack two values using the lua_push*() set of functions. The first pushed valued is the table index in which we want to store some value. The second pushed value is the actual value we want to store in the table. Then, with lua_settable(lua_state, -3) we we perform in the table, t,  stored as the third value in the stack — that is what -3 means — the operation:
-
+第二部分，我们用期望的值填充table。因此，我们用lua_push*()往Lua堆栈压入两个值，第一个是table的下标，第二个是下标对应得值。然后，通过lua_settable(lua_state, -3)将上述下标和对应的值存入table，-3代表从堆栈顶部往下数第三个数据，亦即是我们创建的匿名table。
+以上操作相当于如下代码：
 t[k] = v
 where v and k are the top and second element of the stack. Therefore, this code:
-
+v,k分别是堆栈顶部和第二个元素。
+因此，以下代码：
     lua_pushnumber(lua_state, 1);
     lua_pushnumber(lua_state, 49);
     lua_settable(lua_state, -3);
 just sets the index 1 of our unnamed table to the value 49. Notice that it also pops the index and value stored in the stack, leaving the table as the top value of the stack.
-
+就是设置我们的匿名table的下标1对应的值为49。需要注意的以上操作也将下标和对应的值弹出了堆栈，此时匿名table变成栈顶元素。
 The last thing we have to do is name the table we have created and populated. This is accomplished by the lua_setglobal() sentence, which pops the top of the stack — our table — and sets it as a global table under the given name — in our case “arg”. Lua will be able to see this table from the script.
-
+第三部分，为创建和填充的table起个名字。这一步可以用lua_setglobal()函数，将table命名为arg的同时也将其弹出堆栈。此后，Lua就可以在脚本中识别这个table。
 Once our script has run, the Lua return values are accessed from C++ via the stack. Notice that Lua pushes first the first return value, and last the last one. Thus, popping from the stack recovers the return values in inverse order compared to the return statement in Lua.
-
+一旦脚本运行，其返回值也可以通过Lua堆栈传递给c++。需要注意的是，Lua将返回值按return语句后的值得顺序入栈，逆序出栈。
 The piece of code that makes use of the returned values is large because it has all the verbose system attached. Essentially, it only consists in four operations:
-
+这段操作返回值的代码很大，因为其伴随着冗余的系统信息。
 Get the stack top position using lua_gettop()
 Get the type of the value stored in a certain stack position using lua_type()
 Convert a stack value into a C++ value using the set of lua_to*() functions
 Pop values from the stack using lua_pop()
 which are quite self-explanatory.
-
+用lua_gettop()函数获取栈顶位置
+用lua_type()函数获取栈中具体位置的数据类型
+用lua_to*()函数将堆栈中的数据转换为c++对应的类型
+用lua_pop()函数弹出栈中的数据
+这些函数的名字很好的解释其作用。
 And that is it!
-
+就是这样，很简单！
 This covers the basics of sharing data between the host program and Lua. For instance, you can play with the program changing the Lua script and seeing how the output changes according to that. Remember that you do not need to recompile to see the effects!
-
+此文讨论了宿主语言和Lua共享数据的基本概念。你可以修改Lua脚本用以观察程序的输出变化。务必记住，你不需要重新编译就可以改变其执行逻辑。
 Stay tuned for the next episode, which will be something related to calling C++ functions from Lua. Read the next tutorial!
+下篇文章将讨论如何在Lua脚本中调用c++函数，敬请期待。
