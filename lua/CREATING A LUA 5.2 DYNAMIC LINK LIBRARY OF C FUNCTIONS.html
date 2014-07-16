@@ -1,0 +1,118 @@
+Welcome to the fourth part of these personal notes about the interaction between Lua 5.2 and C++. If you have not yet, you may want to read my previous notes on Running Lua 5.2 scripts from C++, Passing variables from Lua 5.2 to C++, or Calling C++ functions from Lua 5.2.
+
+This new tutorial will cover how to generate a library of C functions and dynamically link it to Lua 5.2. I will be assuming that you know how to generate dynamical link libraries (DLLs). The code presented will be working on Microsoft Visual C++ 2010 express. You should expect having to change some minor things to make it work on other platforms or compilers. As usual, I have been reading  the Lua-User Wiki Sample Code and the Lua 5.2 Reference Manual which you may also want to check.
+
+Purpose
+
+Imagine you have some useful C (or C++) functions compatible with Lua 5.2 — remember the lua_CFunction type — that are really useful and general. For the sake of code reuse you will want to store them in separate packages — read libraries — and dynamically link them when needed. In fact, that is very similar to what you do with the Lua standard libraries. Lua has pieces of code stored in the io, string, table, etc. libraries and when you want to use them you require them from Lua.
+
+Here, we will be learning how to generate a library of C functions and how to call those functions from Lua.
+
+As the C++ code to embed and run the script is essentially the same as in previous tutorials, I will not paste it here. However, I will post the Lua script — it is short and allows better understanding of the program output — and the C++ code to generate the C library. You can download all three pieces from this link.
+
+Lua script
+
+The Lua script just dynamically links our new library, which is called “cfunctions”. We assume the library is in the working directory with the name “cfunctions.dll”. The script will make use of some of the functions defined inside of the library. Notice that the dynamic linking of our custom library is performed by the require() statement.
+
+-- load the c-function library
+io.write("[Lua] Loading the C-function libraryn")
+cfunctions = require("cfunctions")
+
+-- use some of the functions defined in the library
+io.write("[Lua] Executing the C-library functionsn");
+local f = cfunctions.fun1()
+io.write("[Lua] Function 1 says it's ", f, " times funnyn"); 
+f = cfunctions.fun2()
+io.write("[Lua] Function 2 says it's ", f, " times funnyn"); 
+io.write("[Lua] Exiting Lua scriptn")
+Library code
+
+The library code looks like this:
+
+#include <iostream> 
+#include <lua.hpp>
+
+/*
+ * Library functions
+ */
+
+extern "C"
+{
+
+static int funval = 10;
+
+static int function_1(lua_State* l)
+{
+    std::cout << "[DLL] Function 1 is very funny." << std::endl;
+    std::cout << "[DLL] It's fun value is: " << funval << std::endl;
+    lua_pushnumber(l, funval);
+    return 1;
+}
+
+static int function_2(lua_State* l)
+{
+    std::cout << "[DLL] Function 2 is twice as funny!" << std::endl;
+    std::cout << "[DLL] It's fun value is: " << 2*funval << std::endl;
+    lua_pushnumber(l, 2*funval);
+    return 1;
+}
+
+/*
+ * Registering functions
+ */
+
+static const struct luaL_Reg cfunctions[] = {
+    {"fun1", function_1},
+    {"fun2", function_2},
+    {NULL, NULL}
+};
+
+int __declspec(dllexport) luaopen_cfunctions(lua_State* l)
+{
+    luaL_newlibtable(l, cfunctions);
+    luaL_setfuncs(l, cfunctions, 0);
+    return 1;
+}
+} // end extern "C"
+The output of our Lua script is:
+
+
+
+The details
+
+The library code can be used to generate a DLL with an external function called luaopen_cfunctions() and two hidden functions called function_1() and function_2(). The external function will register in Lua all the hidden functions. This way, no one can access the Lua functions from outside Lua.
+
+To register the library we first generate a struct with the information of the functions that will be part of it. In the above code that is the cfunctions luaL_Reg struct:
+
+static const struct luaL_Reg cfunctions[] = {
+    {"fun1", function_1},
+    {"fun2", function_2},
+    {NULL, NULL}
+};
+Notice that in Lua we will be using the names “fun1″ and “fun2″ for each function. After that, we can create a new library table on top of the stack using luaL_newlibtable() and register all our functions there with luaL_setfuncs():
+
+    luaL_newlibtable(l, cfunctions);
+    luaL_setfuncs(l, cfunctions, 0);
+Finally, we return the number of elements added to the stack: only one, the library table.
+
+What can go wrong?
+
+Many things. But I found especially challenging two errors:
+
+“The specified procedure could not be found” was the easiest to solve. I think there are two main reasons for this error message to pop-up in Lua.
+
+One is when you forget to extern-C-wrap the whole library code. Since Lua is built in C, it cannot be linked to C++ code. Hence, one must tell the C++ compiler to generate C code for the library. The way to do it is to wrap the C code in the extern “C” environment.
+
+Another thing that you may be doing wrong is to forget to export the function registering method of the library, i.e. the luaopen_cfunctions() method. In Microsoft compiler you accomplish that by using the macro  __declspecs(dllexport), while in other compilers is enough to define the function as extern. If you hide your registering function, Lua will not be able to call it and, thus, no cake for you.
+
+“Multiple Lua VMs detected” is a more obscure problem. I only have one Lua state, so when I first read it I was a bit confused by the error message. Apparently you cannot statically link both the C++ host program and the C library to Lua. Therefore, you must dynamically link both programs to the Lua library. At least that solved the problem for me.
+
+And that is it!
+
+Hopefully you have learned how to generate a library of C functions that can be dynamically linked to Lua 5.2 using the require() function. It really is not that different than registering the function from the C++ code, but it is much more efficient and favors the code reuse.
+
+Stay tuned for the next episode of these personal notes which will be about encapsulating and passing objects from and to Lua 5.2. Finally the big thing!
+
+ 
+
+Read the next tutorial about implementing classes in Lua 5.2.
