@@ -3,4 +3,4 @@ transcription
 
 personal translation project!
 
-for further information, go www.knightflower.com
+for further information, go www.qqshark.com
